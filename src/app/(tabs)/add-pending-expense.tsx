@@ -1,45 +1,48 @@
-// app/(tabs)/add-expense.tsx
+// app/(tabs)/add-pending-expense.tsx
 
 import { Picker } from '@react-native-picker/picker';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, KeyboardAvoidingView, LayoutAnimation, Modal, Platform, RefreshControl, SafeAreaView, ScrollView, StatusBar, Text, TextInput, TouchableOpacity, UIManager, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { addExpense, Category, getCategories } from '../../../store/expenses';
-import NetInfo from '@react-native-community/netinfo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { auth } from '../../../config/firebase';
+import { addPendingExpense } from '../../../store/pendingExpenses';
 
-// Payment methods
-const PAYMENT_METHODS = [
-  { value: 'cash', label: 'Cash', symbol: '₱', icon: null },
-  { value: 'gcash', label: 'GCash', symbol: null, icon: 'phone' },
-  { value: 'card', label: 'Card', symbol: null, icon: 'credit-card' },
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const BILL_CATEGORIES = [
+  'Electricity', 'Water', 'Internet', 'Rent/Mortgage',
+  'Phone Bill', 'Gas', 'Insurance', 'Subscription', 'Other Bill'
 ];
 
-// Default categories as fallback
-const DEFAULT_CATEGORIES = [
-  'Food', 'Transport', 'Shopping', 'Bills', 
-  'Entertainment', 'Health', 'Education', 'Other'
+const DEBT_CATEGORIES = [
+  'Credit Card', 'Personal Loan', 'Bank Loan', 'Mortgage',
+  'Medical Debt', 'Student Loan', 'Pay Later', 'Other Debt'
 ];
 
-export default function AddExpenseScreen() {
-  const [name, setName] = useState('');
+const TYPE_OPTIONS = [
+  { value: 'bill', label: 'Bill', icon: 'file-text', color: '#4ECDC4' },
+  { value: 'debt', label: 'Debt', icon: 'credit-card', color: '#FF6B6B' },
+];
+
+export default function AddPendingExpenseScreen() {
+  const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
-  const [category, setCategory] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [date, setDate] = useState(new Date());
-  const [note, setNote] = useState('');
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [dueDate, setDueDate] = useState(new Date());
+  const [description, setDescription] = useState('');
+  const [type, setType] = useState<'bill' | 'debt'>('bill');
+  const [category, setCategory] = useState('Electricity');
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [loadingCategories, setLoadingCategories] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(date.getMonth());
-  const [selectedYear, setSelectedYear] = useState(date.getFullYear());
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  const [isOffline, setIsOffline] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(dueDate.getMonth());
+  const [selectedYear, setSelectedYear] = useState(dueDate.getFullYear());
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
 
   const months = [
@@ -50,73 +53,13 @@ export default function AddExpenseScreen() {
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
-  useEffect(() => {
-    loadCategories();
-    
-    // Check network status
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setIsOffline(!state.isConnected);
-    });
-    
-    return () => unsubscribe();
-  }, []);
-
-  const loadCategories = async () => {
-    try {
-      setLoadingCategories(true);
-      
-      // Try to get categories from the store
-      let cats = await getCategories();
-      
-      // If no categories returned, use default categories
-      if (!cats || cats.length === 0) {
-        console.log('No categories from store, using defaults');
-        const userId = auth.currentUser?.uid;
-        cats = DEFAULT_CATEGORIES.map((name, index) => ({
-          id: index.toString(),
-          name: name,
-          userId: userId || ''
-        }));
-      }
-      
-      console.log('Loaded categories:', cats.length, cats.map(c => c.name));
-      setCategories(cats);
-      
-      // Set default category if none selected
-      if (cats.length > 0 && !category) {
-        setCategory(cats[0].name);
-      }
-    } catch (error) {
-      console.error('Error loading categories:', error);
-      // Use default categories on error
-      const userId = auth.currentUser?.uid;
-      const defaultCats = DEFAULT_CATEGORIES.map((name, index) => ({
-        id: index.toString(),
-        name: name,
-        userId: userId || ''
-      }));
-      setCategories(defaultCats);
-      if (defaultCats.length > 0 && !category) {
-        setCategory(defaultCats[0].name);
-      }
-    } finally {
-      setLoadingCategories(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadCategories();
-    setRefreshing(false);
-  };
-
   const getDaysInMonth = (month: number, year: number) => {
     return new Date(year, month + 1, 0).getDate();
   };
 
   const handleDateSelect = (day: number) => {
     const newDate = new Date(selectedYear, selectedMonth, day);
-    setDate(newDate);
+    setDueDate(newDate);
     setShowDatePicker(false);
   };
 
@@ -126,24 +69,23 @@ export default function AddExpenseScreen() {
     setTimeout(() => {
       setShowSuccessModal(false);
       if (!isError) {
-        router.back();
+        router.replace('/(tabs)/pending-expenses');
       }
     }, 1500);
   };
 
+  const handleCancel = () => {
+    router.replace('/(tabs)/pending-expenses');
+  };
+
   const handleSave = async () => {
-    if (!name.trim()) {
-      showSuccessAlert('Please enter an expense name', true);
+    if (!title.trim()) {
+      showSuccessAlert('Please enter a title', true);
       return;
     }
 
     if (!amount) {
       showSuccessAlert('Please enter an amount', true);
-      return;
-    }
-
-    if (!category) {
-      showSuccessAlert('Please select a category', true);
       return;
     }
 
@@ -155,30 +97,69 @@ export default function AddExpenseScreen() {
 
     setLoading(true);
 
-    const expenseData: any = {
-      name: name.trim(),
+    const expenseData = {
+      title: title.trim(),
       amount: expenseAmount,
+      dueDate: dueDate,
+      description: description.trim(),
       category: category,
-      paymentMethod: paymentMethod,
-      date: date,
+      type: type, // Make sure type is included
     };
-    
-    if (note && note.trim().length > 0) {
-      expenseData.note = note.trim();
-    }
 
-    const result = await addExpense(expenseData);
+    console.log('Saving expense with type:', expenseData); // Debug log
+
+    const result = await addPendingExpense(expenseData);
 
     if (result.success) {
-      if (isOffline) {
-        showSuccessAlert('Expense saved offline! Will sync when online.');
-      } else {
-        showSuccessAlert('Expense added successfully');
-      }
+      showSuccessAlert(`${type === 'bill' ? 'Bill' : 'Debt'} added successfully!`);
     } else {
-      showSuccessAlert(result.error || 'Failed to add expense', true);
+      showSuccessAlert(result.error || 'Failed to add', true);
     }
     setLoading(false);
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    setTitle('');
+    setAmount('');
+    setDescription('');
+    setType('bill');
+    setCategory('Electricity');
+    setDueDate(new Date());
+    setSelectedMonth(new Date().getMonth());
+    setSelectedYear(new Date().getFullYear());
+    setShowTypeDropdown(false);
+    setShowCategoryDropdown(false);
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 500);
+  };
+
+  const toggleTypeDropdown = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setShowTypeDropdown(!showTypeDropdown);
+  };
+
+  const selectType = (selectedType: 'bill' | 'debt') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setType(selectedType);
+    setCategory(selectedType === 'bill' ? 'Electricity' : 'Credit Card');
+    setShowTypeDropdown(false);
+  };
+
+  const toggleCategoryDropdown = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setShowCategoryDropdown(!showCategoryDropdown);
+  };
+
+  const selectCategory = (cat: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setCategory(cat);
+    setShowCategoryDropdown(false);
+  };
+
+  const getCurrentCategories = () => {
+    return type === 'bill' ? BILL_CATEGORIES : DEBT_CATEGORIES;
   };
 
   const CustomDatePicker = () => {
@@ -193,9 +174,9 @@ export default function AddExpenseScreen() {
     };
 
     const isSelectedDate = (day: number) => {
-      return date.getDate() === day && 
-             date.getMonth() === selectedMonth && 
-             date.getFullYear() === selectedYear;
+      return dueDate.getDate() === day && 
+             dueDate.getMonth() === selectedMonth && 
+             dueDate.getFullYear() === selectedYear;
     };
 
     const weekDays = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -229,7 +210,7 @@ export default function AddExpenseScreen() {
               borderBottomColor: '#2a5a3a',
             }}>
               <Text style={{ color: '#ffffff', fontSize: 20, fontFamily: 'Poppins-Bold' }}>
-                Select Date
+                Select Due Date
               </Text>
               <TouchableOpacity onPress={() => setShowDatePicker(false)}>
                 <Icon name="x" size={24} color="#90ee90" />
@@ -301,7 +282,7 @@ export default function AddExpenseScreen() {
               ))}
             </View>
 
-            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={true}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                 {Array.from({ length: firstDayOfMonth }).map((_, index) => (
                   <View key={`empty-${index}`} style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 5 }}>
@@ -357,7 +338,7 @@ export default function AddExpenseScreen() {
                 const today = new Date();
                 setSelectedMonth(today.getMonth());
                 setSelectedYear(today.getFullYear());
-                setDate(today);
+                setDueDate(today);
                 setShowDatePicker(false);
               }}
             >
@@ -379,41 +360,100 @@ export default function AddExpenseScreen() {
       >
         <ScrollView 
           style={{ flex: 1 }}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
               tintColor="#90ee90"
               colors={['#90ee90']}
+              title="Refreshing..."
+              titleColor="#90ee90"
             />
           }
         >
-          <View style={{ padding: 20 }}>
+          <View style={{ padding: 20, paddingBottom: 40 }}>
             <View style={{ marginTop: 20, marginBottom: 20 }}>
               <Text style={{ color: '#ffffff', fontSize: 28, fontFamily: 'Poppins-Bold' }}>
-                Add Expense
+                Add {type === 'bill' ? 'Bill' : 'Debt'}
               </Text>
-              {isOffline && (
-                <View style={{ 
-                  backgroundColor: '#FFA500', 
-                  paddingHorizontal: 10, 
-                  paddingVertical: 4, 
-                  borderRadius: 8,
-                  alignSelf: 'flex-start',
-                  marginTop: 8,
-                }}>
-                  <Text style={{ color: '#ffffff', fontSize: 10, fontFamily: 'Poppins-Regular' }}>
-                    Offline Mode - Will sync when online
+            </View>
+
+            {/* Type Selection */}
+            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
+              Type *
+            </Text>
+            <View style={{ marginBottom: 15 }}>
+              <TouchableOpacity 
+                onPress={toggleTypeDropdown}
+                activeOpacity={0.7}
+                style={{
+                  backgroundColor: '#1a3a2a',
+                  padding: 15,
+                  borderRadius: 10,
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#2a5a3a',
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Icon 
+                    name={type === 'bill' ? 'file-text' : 'credit-card'} 
+                    size={20} 
+                    color={type === 'bill' ? '#4ECDC4' : '#FF6B6B'} 
+                  />
+                  <Text style={{ color: '#ffffff', fontSize: 16, fontFamily: 'Poppins-Regular' }}>
+                    {type === 'bill' ? 'Bill' : 'Debt'}
                   </Text>
+                </View>
+                <Icon 
+                  name={showTypeDropdown ? 'chevron-up' : 'chevron-down'} 
+                  size={20} 
+                  color="#90ee90" 
+                />
+              </TouchableOpacity>
+
+              {showTypeDropdown && (
+                <View style={{
+                  marginTop: 5,
+                  backgroundColor: '#1a3a2a',
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#2a5a3a',
+                  overflow: 'hidden',
+                }}>
+                  {TYPE_OPTIONS.map((option) => (
+                    <TouchableOpacity
+                      key={option.value}
+                      onPress={() => selectType(option.value as 'bill' | 'debt')}
+                      style={{
+                        padding: 12,
+                        paddingHorizontal: 15,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                        backgroundColor: type === option.value ? '#2a5a3a' : 'transparent',
+                      }}
+                    >
+                      <Icon name={option.icon} size={20} color={option.color} />
+                      <Text style={{
+                        color: type === option.value ? '#90ee90' : '#ffffff',
+                        fontSize: 14,
+                        fontFamily: 'Poppins-Regular',
+                      }}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               )}
             </View>
 
-            {/* Expense Name Field */}
             <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
-              Expense Name *
+              Title *
             </Text>
             <TextInput
               style={{
@@ -425,13 +465,12 @@ export default function AddExpenseScreen() {
                 fontFamily: 'Poppins-Regular',
                 fontSize: 16
               }}
-              placeholder="e.g., Grocery shopping, Coffee, Lunch"
+              placeholder={type === 'bill' ? "e.g., Electricity Bill" : "e.g., Credit Card Debt"}
               placeholderTextColor="#90ee90"
-              value={name}
-              onChangeText={setName}
+              value={title}
+              onChangeText={setTitle}
             />
 
-            {/* Amount Field */}
             <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
               Amount *
             </Text>
@@ -452,102 +491,78 @@ export default function AddExpenseScreen() {
               keyboardType="decimal-pad"
             />
 
-            {/* Category Picker - Shows ALL categories */}
+            {/* Category Dropdown */}
             <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
               Category *
             </Text>
-            <View style={{ 
-              backgroundColor: '#2a5a3a', 
-              borderRadius: 10, 
-              marginBottom: 15, 
-              overflow: 'hidden',
-              borderWidth: 1,
-              borderColor: '#4a8a6a'
-            }}>
-              {loadingCategories ? (
-                <View style={{ padding: 15, alignItems: 'center' }}>
-                  <ActivityIndicator color="#90ee90" />
-                  <Text style={{ color: '#c0e0c0', marginTop: 5, fontFamily: 'Poppins-Regular' }}>
-                    Loading categories...
-                  </Text>
-                </View>
-              ) : categories.length > 0 ? (
-                <Picker
-                  selectedValue={category}
-                  onValueChange={(itemValue) => {
-                    console.log('Selected category:', itemValue);
-                    setCategory(itemValue);
-                  }}
-                  dropdownIconColor="#90ee90"
-                  style={{ 
-                    color: '#ffffff', 
-                    backgroundColor: '#2a5a3a', 
-                    height: 50,
-                  }}
-                  dropdownBackgroundColor="#2a5a3a"
-                >
-                  {categories.map((cat) => (
-                    <Picker.Item 
-                      key={cat.id || cat.name} 
-                      label={cat.name} 
-                      value={cat.name} 
-                      color="#ffffff"
-                      style={{ backgroundColor: '#2a5a3a', color: '#ffffff' }}
-                    />
-                  ))}
-                </Picker>
-              ) : (
-                <View style={{ padding: 15 }}>
-                  <Text style={{ color: '#c0e0c0', textAlign: 'center', fontFamily: 'Poppins-Regular' }}>
-                    No categories available. Please pull down to refresh.
-                  </Text>
+            <View style={{ marginBottom: 15 }}>
+              <TouchableOpacity 
+                onPress={toggleCategoryDropdown}
+                activeOpacity={0.7}
+                style={{
+                  backgroundColor: '#1a3a2a',
+                  padding: 15,
+                  borderRadius: 10,
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#2a5a3a',
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 16, fontFamily: 'Poppins-Regular' }}>
+                  {category}
+                </Text>
+                <Icon 
+                  name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'} 
+                  size={20} 
+                  color="#90ee90" 
+                />
+              </TouchableOpacity>
+
+              {showCategoryDropdown && (
+                <View style={{
+                  marginTop: 5,
+                  backgroundColor: '#1a3a2a',
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#2a5a3a',
+                  overflow: 'hidden',
+                  maxHeight: 200,
+                }}>
+                  <ScrollView 
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={true}
+                    style={{ maxHeight: 200 }}
+                  >
+                    {getCurrentCategories().map((cat, index) => (
+                      <TouchableOpacity
+                        key={cat}
+                        onPress={() => selectCategory(cat)}
+                        style={{
+                          padding: 12,
+                          paddingHorizontal: 15,
+                          borderBottomWidth: index !== getCurrentCategories().length - 1 ? 1 : 0,
+                          borderBottomColor: '#2a5a3a',
+                          backgroundColor: category === cat ? '#2a5a3a' : 'transparent',
+                        }}
+                      >
+                        <Text style={{
+                          color: category === cat ? '#90ee90' : '#ffffff',
+                          fontSize: 14,
+                          fontFamily: 'Poppins-Regular',
+                        }}>
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
               )}
             </View>
 
-            {/* Payment Method */}
             <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
-              Payment Method
-            </Text>
-            <View style={{
-              flexDirection: 'row',
-              gap: 12,
-              marginBottom: 15,
-            }}>
-              {PAYMENT_METHODS.map((method) => (
-                <TouchableOpacity
-                  key={method.value}
-                  style={{
-                    flex: 1,
-                    backgroundColor: paymentMethod === method.value ? '#3a6a4a' : '#2a5a3a',
-                    padding: 12,
-                    borderRadius: 10,
-                    alignItems: 'center',
-                    borderWidth: paymentMethod === method.value ? 1 : 0,
-                    borderColor: '#90ee90',
-                    flexDirection: 'row',
-                    justifyContent: 'center',
-                    gap: 8,
-                  }}
-                  onPress={() => setPaymentMethod(method.value)}
-                >
-                  {method.icon ? (
-                    <Icon name={method.icon} size={18} color="#90ee90" />
-                  ) : (
-                    <Text style={{ color: '#90ee90', fontSize: 18, fontFamily: 'Poppins-Bold' }}>
-                      {method.symbol}
-                    </Text>
-                  )}
-                  <Text style={{ color: '#ffffff', fontFamily: 'Poppins-Regular', fontSize: 14 }}>
-                    {method.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Date Picker */}
-            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
-              Date *
+              Due Date *
             </Text>
             <TouchableOpacity
               style={{
@@ -564,14 +579,13 @@ export default function AddExpenseScreen() {
               onPress={() => setShowDatePicker(true)}
             >
               <Text style={{ color: '#ffffff', fontFamily: 'Poppins-Regular', fontSize: 16 }}>
-                {date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                {dueDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
               </Text>
               <Icon name="calendar" size={22} color="#90ee90" />
             </TouchableOpacity>
 
-            {/* Note Field */}
             <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular' }}>
-              Note (Optional)
+              Description (Optional)
             </Text>
             <TextInput
               style={{
@@ -584,40 +598,59 @@ export default function AddExpenseScreen() {
                 height: 100,
                 textAlignVertical: 'top'
               }}
-              placeholder="Add a note..."
+              placeholder="Add additional details..."
               placeholderTextColor="#90ee90"
-              value={note}
-              onChangeText={setNote}
+              value={description}
+              onChangeText={setDescription}
               multiline
             />
 
-            {/* Save Button */}
-            <TouchableOpacity
-              style={{
-                backgroundColor: '#90ee90',
-                padding: 15,
-                borderRadius: 10,
-                alignItems: 'center',
-                opacity: loading ? 0.7 : 1
-              }}
-              onPress={handleSave}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#1a472a" />
-              ) : (
-                <Text style={{ color: '#1a472a', fontSize: 16, fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>
-                  {isOffline ? 'Save Offline' : 'Save Expense'}
+            {/* Buttons Row */}
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#3a6a4a',
+                  padding: 15,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#4a8a6a',
+                }}
+                onPress={handleCancel}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>
+                  Cancel
                 </Text>
-              )}
-            </TouchableOpacity>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#90ee90',
+                  padding: 15,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  opacity: loading ? 0.7 : 1
+                }}
+                onPress={handleSave}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#1a472a" />
+                ) : (
+                  <Text style={{ color: '#1a472a', fontSize: 16, fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>
+                    Add {type === 'bill' ? 'Bill' : 'Debt'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
       <CustomDatePicker />
 
-      {/* Success/Error Modal */}
       <Modal
         visible={showSuccessModal}
         transparent={true}

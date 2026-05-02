@@ -1,14 +1,24 @@
+// app/(tabs)/statistics.tsx
+
+import NetInfo from '@react-native-community/netinfo';
 import { Picker } from '@react-native-picker/picker';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, Modal, RefreshControl, SafeAreaView, ScrollView, StatusBar, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Dimensions, FlatList, Modal, RefreshControl, SafeAreaView, ScrollView, StatusBar, Text, TouchableOpacity, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
-import { Expense, getExpenses } from '../../../store/expenses';
+import { Expense, getCategories, getExpenses } from '../../../store/expenses';
+import { getShoppingItems, ShoppingItem } from '../../../store/shoppingList';
+const { width, height } = Dimensions.get('window');
 
-const { width } = Dimensions.get('window');
+const AVAILABLE_CATEGORIES = [
+  'Food', 'Transport', 'Shopping', 'Bills', 
+  'Entertainment', 'Health', 'Education', 'Other'
+];
 
 export default function StatisticsScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
+  const [categories, setCategories] = useState<string[]>(AVAILABLE_CATEGORIES);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [chartData, setChartData] = useState<any[]>([]);
@@ -16,39 +26,55 @@ export default function StatisticsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [totalSpending, setTotalSpending] = useState(0);
+  const [totalShopping, setTotalShopping] = useState(0);
+  const [totalExpenses, setTotalExpenses] = useState(0);
   const [selectedMonth, setSelectedMonth] = useState('');
   const [selectedMonthPicker, setSelectedMonthPicker] = useState(selectedDate.getMonth());
   const [selectedYearPicker, setSelectedYearPicker] = useState(selectedDate.getFullYear());
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   const months = [
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
 
-  // Generate years (current year - 5 to current year + 5)
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 11 }, (_, i) => currentYear - 5 + i);
 
   useEffect(() => {
-    loadExpenses();
+    loadData();
+    
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOffline(!state.isConnected);
+    });
+    
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (expenses.length > 0 || !loading) {
+    if ((expenses.length > 0 || shoppingItems.length > 0) || !loading) {
       processData();
     }
-  }, [expenses, selectedDate]);
+  }, [expenses, shoppingItems, selectedDate]);
 
-  const loadExpenses = async () => {
+  const loadData = async () => {
     try {
       setLoading(true);
-      const allExpenses = await getExpenses();
-      console.log('Loaded expenses:', allExpenses.length);
+      const [allExpenses, allShoppingItems, savedCategories] = await Promise.all([
+        getExpenses(),
+        getShoppingItems(),
+        getCategories()
+      ]);
       setExpenses(allExpenses);
+      setShoppingItems(allShoppingItems);
+      
+      if (savedCategories && savedCategories.length > 0) {
+        setCategories(savedCategories.map(cat => cat.name));
+      }
+      
       updateMonthLabel(selectedDate);
     } catch (error) {
-      console.error('Error loading expenses:', error);
+      console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
@@ -56,7 +82,7 @@ export default function StatisticsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadExpenses();
+    await loadData();
     setRefreshing(false);
   };
 
@@ -74,16 +100,13 @@ export default function StatisticsScreen() {
 
   const handleMonthChange = useCallback((itemValue: number) => {
     setSelectedMonthPicker(itemValue);
-    // Don't close modal, just update the picker
   }, []);
 
   const handleYearChange = useCallback((itemValue: number) => {
     setSelectedYearPicker(itemValue);
-    // Don't close modal, just update the picker
   }, []);
 
   const handleApplyDate = useCallback(() => {
-    // Keep the current day or adjust if the selected day doesn't exist in the new month
     const daysInMonth = new Date(selectedYearPicker, selectedMonthPicker + 1, 0).getDate();
     let newDay = selectedDate.getDate();
     if (newDay > daysInMonth) {
@@ -100,66 +123,91 @@ export default function StatisticsScreen() {
   };
 
   const processData = () => {
-    if (!expenses.length) {
-      setChartData([]);
-      setDailySpending([]);
-      setTotalSpending(0);
-      return;
-    }
-
-    // Filter expenses for selected month and year
-    const filtered = expenses.filter(exp => {
+    const filteredExpenses = expenses.filter(exp => {
       const expDate = new Date(exp.date);
       return expDate.getMonth() === selectedDate.getMonth() && 
              expDate.getFullYear() === selectedDate.getFullYear();
     });
 
-    // Calculate total spending
-    const total = filtered.reduce((sum, exp) => sum + exp.amount, 0);
-    setTotalSpending(total);
-
-    // Process donut pie chart data by category
-    const categoryMap = new Map();
-    filtered.forEach(exp => {
-      categoryMap.set(exp.category, (categoryMap.get(exp.category) || 0) + exp.amount);
+    const filteredShopping = shoppingItems.filter(item => {
+      if (!item.completed) return false;
+      const purchaseDate = item.completedAt ? new Date(item.completedAt) : new Date(item.createdAt);
+      return purchaseDate.getMonth() === selectedDate.getMonth() && 
+             purchaseDate.getFullYear() === selectedDate.getFullYear();
     });
 
-    // Vibrant colors - NO GREEN or DARK GREEN
+    const expensesTotal = filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+    const shoppingTotalAmount = filteredShopping.reduce((sum, item) => sum + item.price, 0);
+    const total = expensesTotal + shoppingTotalAmount;
+    
+    setTotalExpenses(expensesTotal);
+    setTotalShopping(shoppingTotalAmount);
+    setTotalSpending(total);
+
+    const categoryMap = new Map();
+    
+    categories.forEach(category => {
+      categoryMap.set(category, 0);
+    });
+    
+    filteredExpenses.forEach(exp => {
+      const category = exp.category || 'Other';
+      const currentAmount = categoryMap.get(category) || 0;
+      categoryMap.set(category, currentAmount + exp.amount);
+    });
+    
+    filteredShopping.forEach(item => {
+      const category = item.category || 'Shopping';
+      const currentAmount = categoryMap.get(category) || 0;
+      categoryMap.set(category, currentAmount + item.price);
+    });
+
     const colors = [
       '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFEAA7', '#DDA0DD',
       '#98D8C8', '#F7D794', '#778BEB', '#E77F67', '#F3A683',
       '#F8A5C2', '#63CDDA', '#FDA7DF', '#ED4C67', '#6F1A51',
       '#EE5A24', '#0ABDE3', '#F9CA24', '#7ED6DF', '#C44569'
     ];
+    
     let colorIndex = 0;
     
     const pieData = Array.from(categoryMap.entries())
+      .filter(([_, amount]) => amount > 0)
       .sort((a, b) => b[1] - a[1])
       .map(([name, amount]) => ({
-        name: name.length > 15 ? name.substring(0, 12) + '...' : name,
+        name: name,
         amount: amount,
         color: colors[colorIndex++ % colors.length],
+        percentage: ((amount / total) * 100).toFixed(1)
       }));
 
     setChartData(pieData);
 
-    // Process daily spending for the selected month
     const dailyData = [];
     const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
     
     for (let i = 1; i <= daysInMonth; i++) {
       const date = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), i);
-      const dayExpenses = filtered.filter(exp => {
+      
+      const dayExpenses = filteredExpenses.filter(exp => {
         const expDate = new Date(exp.date);
         return expDate.getDate() === i;
       });
+      const expensesTotalDay = dayExpenses.reduce((sum, exp) => sum + exp.amount, 0);
       
-      const dayTotal = dayExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+      const dayShopping = filteredShopping.filter(item => {
+        const purchaseDate = item.completedAt ? new Date(item.completedAt) : new Date(item.createdAt);
+        return purchaseDate.getDate() === i;
+      });
+      const shoppingTotalDay = dayShopping.reduce((sum, item) => sum + item.price, 0);
+      
+      const dayTotal = expensesTotalDay + shoppingTotalDay;
+      
       if (dayTotal > 0) {
         dailyData.push({
           day: i,
           dayName: date.toLocaleDateString('en-US', { weekday: 'short' }),
-          amount: dayTotal
+          amount: dayTotal,
         });
       }
     }
@@ -168,8 +216,14 @@ export default function StatisticsScreen() {
     setDailySpending(dailyData);
   };
 
-  // Donut Pie Chart Component
-  const DonutPieChart = ({ data, size = 220, total }: { data: any[]; size?: number; total: number }) => {
+  const formatNumber = (num: number) => {
+    return num.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
+
+  const DonutChartWithTotal = ({ data, size = 220 }: { data: any[]; size?: number }) => {
     if (!data || data.length === 0) {
       return (
         <View style={{ height: size, justifyContent: 'center', alignItems: 'center' }}>
@@ -184,10 +238,8 @@ export default function StatisticsScreen() {
     const center = size / 2;
     const radius = size / 2.2;
     const holeRadius = radius / 1.6;
-    
-    // Calculate total for percentages
-    const grandTotal = data.reduce((sum, item) => sum + item.amount, 0);
-    let currentAngle = -90; // Start from top
+    const grandTotal = totalSpending;
+    let currentAngle = -90;
     
     const segments = [];
     for (let i = 0; i < data.length; i++) {
@@ -220,29 +272,53 @@ export default function StatisticsScreen() {
       currentAngle = endAngle;
     }
     
-    // Format total as "₱ 000.00" in a single line
-    const formattedTotal = `₱ ${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    
     return (
       <View style={{ alignItems: 'center' }}>
         <Svg height={size} width={size} viewBox={`0 0 ${size} ${size}`}>
           {segments}
-          {/* Hole in the center */}
           <Circle cx={center} cy={center} r={holeRadius} fill="#1a472a" />
         </Svg>
         
-        {/* Text overlay - single line format */}
-        <View style={{ position: 'absolute', top: center - 12, left: 0, right: 0, alignItems: 'center' }}>
-          <Text style={{ color: '#ffffff', fontSize: 16, fontFamily: 'Poppins-Bold' }}>
-            {formattedTotal}
+        <View style={{ position: 'absolute', top: center - 25, left: 0, right: 0, alignItems: 'center' }}>
+          <Text style={{ color: '#4ECDC4', fontSize: 11, fontFamily: 'Poppins-SemiBold' }}>
+            Total
           </Text>
-          <Text style={{ color: '#90ee90', fontSize: 10, fontFamily: 'Poppins-Regular', marginTop: 4 }}>Total</Text>
+          <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-Bold' }}>
+            ₱{formatNumber(grandTotal)}
+          </Text>
         </View>
       </View>
     );
   };
 
-  // Custom Calendar Modal - No Blinking
+  const CategoryList = ({ data }: { data: any[] }) => {
+    if (!data || data.length === 0) return null;
+    
+    const grandTotal = totalSpending;
+    
+    return (
+      <View style={{ marginTop: 20, width: '100%' }}>
+        {data.map((item, index) => {
+          const percentage = ((item.amount / grandTotal) * 100).toFixed(1);
+          return (
+            <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <View style={{ width: 12, height: 12, backgroundColor: item.color, marginRight: 12, borderRadius: 4 }} />
+              <Text style={{ color: '#ffffff', flex: 1, fontFamily: 'Poppins-Regular', fontSize: 13 }}>
+                {item.name}
+              </Text>
+              <Text style={{ color: '#90ee90', fontFamily: 'Poppins-SemiBold', fontSize: 13, marginRight: 8 }}>
+                ₱{formatNumber(item.amount)}
+              </Text>
+              <Text style={{ color: '#4ECDC4', fontFamily: 'Poppins-SemiBold', fontSize: 12 }}>
+                {percentage}%
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   const CustomDatePicker = () => {
     const daysInMonth = getDaysInMonth(selectedMonthPicker, selectedYearPicker);
     const firstDayOfMonth = new Date(selectedYearPicker, selectedMonthPicker, 1).getDay();
@@ -281,7 +357,6 @@ export default function StatisticsScreen() {
             padding: 20,
             maxHeight: '80%',
           }}>
-            {/* Header */}
             <View style={{
               flexDirection: 'row',
               justifyContent: 'space-between',
@@ -299,27 +374,21 @@ export default function StatisticsScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Month and Year Selector - No blinking */}
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
               <View style={{ 
                 flex: 1, 
-                backgroundColor: '#2a5a3a', 
+                backgroundColor: '#1a3a2a', 
                 borderRadius: 10, 
                 overflow: 'hidden',
                 borderWidth: 1,
-                borderColor: '#4a8a6a',
+                borderColor: '#2a5a3a',
               }}>
                 <Picker
                   selectedValue={selectedMonthPicker}
                   onValueChange={handleMonthChange}
                   dropdownIconColor="#90ee90"
-                  style={{ 
-                    color: '#ffffff', 
-                    backgroundColor: '#2a5a3a', 
-                    height: 50,
-                  }}
-                  mode="dropdown"
-                  prompt="Select month"
+                  style={{ color: '#ffffff', backgroundColor: '#1a3a2a', height: 50 }}
+                  dropdownBackgroundColor="#1a3a2a"
                 >
                   {months.map((month, index) => (
                     <Picker.Item 
@@ -327,33 +396,25 @@ export default function StatisticsScreen() {
                       label={month} 
                       value={index} 
                       color="#ffffff"
-                      style={{
-                        backgroundColor: '#2a5a3a',
-                        color: '#ffffff',
-                      }}
+                      style={{ backgroundColor: '#1a3a2a', color: '#ffffff' }}
                     />
                   ))}
                 </Picker>
               </View>
               <View style={{ 
                 flex: 1, 
-                backgroundColor: '#2a5a3a', 
+                backgroundColor: '#1a3a2a', 
                 borderRadius: 10, 
                 overflow: 'hidden',
                 borderWidth: 1,
-                borderColor: '#4a8a6a',
+                borderColor: '#2a5a3a',
               }}>
                 <Picker
                   selectedValue={selectedYearPicker}
                   onValueChange={handleYearChange}
                   dropdownIconColor="#90ee90"
-                  style={{ 
-                    color: '#ffffff', 
-                    backgroundColor: '#2a5a3a', 
-                    height: 50,
-                  }}
-                  mode="dropdown"
-                  prompt="Select year"
+                  style={{ color: '#ffffff', backgroundColor: '#1a3a2a', height: 50 }}
+                  dropdownBackgroundColor="#1a3a2a"
                 >
                   {years.map((year) => (
                     <Picker.Item 
@@ -361,17 +422,13 @@ export default function StatisticsScreen() {
                       label={year.toString()} 
                       value={year} 
                       color="#ffffff"
-                      style={{
-                        backgroundColor: '#2a5a3a',
-                        color: '#ffffff',
-                      }}
+                      style={{ backgroundColor: '#1a3a2a', color: '#ffffff' }}
                     />
                   ))}
                 </Picker>
               </View>
             </View>
 
-            {/* Week Days Header */}
             <View style={{ flexDirection: 'row', marginBottom: 10, paddingHorizontal: 5 }}>
               {weekDays.map((day, index) => (
                 <View key={index} style={{ flex: 1, alignItems: 'center' }}>
@@ -382,17 +439,14 @@ export default function StatisticsScreen() {
               ))}
             </View>
 
-            {/* Calendar Days - No blinking */}
             <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {/* Empty spaces for first week */}
                 {Array.from({ length: firstDayOfMonth }).map((_, index) => (
                   <View key={`empty-${index}`} style={{ width: `${100 / 7}%`, aspectRatio: 1, padding: 5 }}>
                     <View style={{ flex: 1 }} />
                   </View>
                 ))}
                 
-                {/* Days of the month */}
                 {Array.from({ length: daysInMonth }).map((_, index) => {
                   const day = index + 1;
                   const isCurrentDay = isToday(day);
@@ -427,7 +481,6 @@ export default function StatisticsScreen() {
               </View>
             </ScrollView>
 
-            {/* Apply and Today Buttons */}
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 15 }}>
               <TouchableOpacity
                 style={{
@@ -466,11 +519,72 @@ export default function StatisticsScreen() {
     );
   };
 
+  const StickyHeader = () => (
+    <View style={{ padding: 20, paddingBottom: 10 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
+        <Text style={{ color: '#ffffff', fontSize: 28, fontFamily: 'Poppins-Bold' }}>
+          Statistics
+        </Text>
+        <TouchableOpacity 
+          onPress={() => {
+            setSelectedMonthPicker(selectedDate.getMonth());
+            setSelectedYearPicker(selectedDate.getFullYear());
+            setShowDatePicker(true);
+          }}
+          style={{
+            backgroundColor: '#2a5a3a',
+            padding: 8,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: '#4a8a6a'
+          }}
+        >
+          <Icon name="calendar" size={22} color="#90ee90" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={{
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 20,
+      }}>
+        <View style={{
+          flex: 1,
+          backgroundColor: '#2a5a3a',
+          padding: 15,
+          borderRadius: 12,
+        }}>
+          <Text style={{ color: '#90ee90', fontSize: 12, fontFamily: 'Poppins-Regular' }}>
+            Expenses
+          </Text>
+          <Text style={{ color: '#ffffff', fontSize: 20, fontFamily: 'Poppins-Bold' }}>
+            ₱{formatNumber(totalExpenses)}
+          </Text>
+        </View>
+        <View style={{
+          flex: 1,
+          backgroundColor: '#1a3a2a',
+          padding: 15,
+          borderRadius: 12,
+        }}>
+          <Text style={{ color: '#90ee90', fontSize: 12, fontFamily: 'Poppins-Regular' }}>
+            Shopping
+          </Text>
+          <Text style={{ color: '#4ECDC4', fontSize: 20, fontFamily: 'Poppins-Bold' }}>
+            ₱{formatNumber(totalShopping)}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
   if (loading && !refreshing) {
     return (
       <View style={{ flex: 1, backgroundColor: '#1a472a', justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#90ee90" />
-        <Text style={{ color: '#c0e0c0', marginTop: 10, fontFamily: 'Poppins-Regular' }}>Loading statistics...</Text>
+        <Text style={{ color: '#c0e0c0', marginTop: 10, fontFamily: 'Poppins-Regular' }}>
+          {isOffline ? 'Using offline data...' : 'Loading statistics...'}
+        </Text>
       </View>
     );
   }
@@ -478,157 +592,143 @@ export default function StatisticsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#1a472a' }}>
       <StatusBar barStyle="light-content" backgroundColor="#1a472a" />
-      <ScrollView 
-        style={{ flex: 1 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#90ee90"
-            colors={['#90ee90']}
-          />
-        }
-      >
-        <View style={{ padding: 20 }}>
-          {/* Header with Calendar Only */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
-            <Text style={{ color: '#ffffff', fontSize: 28, fontFamily: 'Poppins-Bold' }}>
-              Statistics
-            </Text>
-            <TouchableOpacity 
-              onPress={() => {
-                setSelectedMonthPicker(selectedDate.getMonth());
-                setSelectedYearPicker(selectedDate.getFullYear());
-                setShowDatePicker(true);
-              }}
-              style={{
+      
+      <View style={{ flex: 1 }}>
+        <StickyHeader />
+
+        <FlatList
+          data={[{ key: 'content' }]}
+          renderItem={() => (
+            <View style={{ paddingHorizontal: 20 }}>
+              {/* Donut Chart */}
+              <View style={{
                 backgroundColor: '#2a5a3a',
-                padding: 8,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: '#4a8a6a'
-              }}
-            >
-              <Icon name="calendar" size={22} color="#90ee90" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Month Display */}
-          <View style={{
-            backgroundColor: '#2a5a3a',
-            padding: 15,
-            borderRadius: 10,
-            marginBottom: 20,
-            alignItems: 'center'
-          }}>
-            <Text style={{ color: '#90ee90', fontSize: 14, fontFamily: 'Poppins-Regular' }}>
-              Showing Statistics For
-            </Text>
-            <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-SemiBold', marginTop: 5 }}>
-              {selectedMonth || 'Select a month'}
-            </Text>
-          </View>
-
-          {/* Donut Pie Chart Section */}
-          <View style={{
-            backgroundColor: '#2a5a3a',
-            padding: 20,
-            borderRadius: 15,
-            marginBottom: 20,
-            alignItems: 'center',
-            minHeight: 320
-          }}>
-            <Text style={{ color: '#90ee90', fontSize: 16, fontFamily: 'Poppins-SemiBold', marginBottom: 20 }}>
-              Spending by Category
-            </Text>
-            
-            <DonutPieChart data={chartData} size={220} total={totalSpending} />
-            
-            {/* Legend */}
-            {chartData.length > 0 && (
-              <View style={{ marginTop: 20, width: '100%' }}>
-                {chartData.map((item, index) => (
-                  <View key={index} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                    <View style={{ width: 12, height: 12, backgroundColor: item.color, marginRight: 12, borderRadius: 4 }} />
-                    <Text style={{ color: '#ffffff', flex: 1, fontFamily: 'Poppins-Regular', fontSize: 13 }}>
-                      {item.name}
-                    </Text>
-                    <Text style={{ color: '#90ee90', fontFamily: 'Poppins-SemiBold', fontSize: 13 }}>
-                      ₱{item.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* Daily Spending Section */}
-          <View style={{
-            backgroundColor: '#2a5a3a',
-            padding: 20,
-            borderRadius: 15,
-            marginBottom: 30
-          }}>
-            <Text style={{ color: '#90ee90', fontSize: 16, fontFamily: 'Poppins-SemiBold', marginBottom: 15 }}>
-              Daily Spending
-            </Text>
-            {dailySpending.length > 0 ? (
-              dailySpending.map((day, index) => {
-                const maxAmount = Math.max(...dailySpending.map(d => d.amount), 1);
-                const percentage = (day.amount / maxAmount) * 100;
-                return (
-                  <View key={index} style={{ marginBottom: 15 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                      <Text style={{ color: '#ffffff', fontFamily: 'Poppins-Regular' }}>
-                        Day {day.day} ({day.dayName})
-                      </Text>
-                      <Text style={{ color: '#90ee90', fontFamily: 'Poppins-SemiBold' }}>
-                        ₱{day.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </Text>
-                    </View>
-                    <View style={{ height: 8, backgroundColor: '#3a6a4a', borderRadius: 4, overflow: 'hidden' }}>
-                      <View style={{
-                        height: '100%',
-                        width: `${percentage}%`,
-                        backgroundColor: '#90ee90',
-                        borderRadius: 4
-                      }} />
-                    </View>
-                  </View>
-                );
-              })
-            ) : (
-              <View style={{ alignItems: 'center', padding: 30 }}>
-                <Icon name="bar-chart-2" size={50} color="#90ee90" />
-                <Text style={{ color: '#c0e0c0', textAlign: 'center', fontFamily: 'Poppins-Regular', marginTop: 10 }}>
-                  No daily spending data for {selectedMonth}
+                paddingVertical: 25,
+                paddingHorizontal: 20,
+                borderRadius: 20,
+                marginBottom: 20,
+                alignItems: 'center',
+              }}>
+                <View style={{ alignItems: 'center', marginBottom: 15 }}>
+                  <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-Bold', textAlign: 'center' }}>
+                    Spending Distribution
+                  </Text>
+                  <View style={{ 
+                    width: 50, 
+                    height: 3, 
+                    backgroundColor: '#4ECDC4', 
+                    borderRadius: 2, 
+                    marginTop: 8 
+                  }} />
+                </View>
+                
+                <Text style={{ color: '#c0e0c0', fontSize: 12, fontFamily: 'Poppins-Regular', textAlign: 'center', marginBottom: 20 }}>
+                  {selectedMonth}
                 </Text>
+                
+                {chartData.length === 0 && totalSpending === 0 ? (
+                  <View style={{ alignItems: 'center', padding: 40 }}>
+                    <Icon name="pie-chart" size={50} color="#90ee90" opacity={0.5} />
+                    <Text style={{ color: '#c0e0c0', fontFamily: 'Poppins-Regular', marginTop: 10, textAlign: 'center' }}>
+                      No data for this month
+                    </Text>
+                    {isOffline && (
+                      <Text style={{ color: '#90ee90', fontSize: 11, fontFamily: 'Poppins-Regular', marginTop: 5 }}>
+                        Connect to internet to sync data
+                      </Text>
+                    )}
+                  </View>
+                ) : (
+                  <>
+                    <DonutChartWithTotal data={chartData} size={220} />
+                    <CategoryList data={chartData} />
+                  </>
+                )}
               </View>
-            )}
-          </View>
 
-          {/* No Expenses Message */}
-          {expenses.length === 0 && (
-            <View style={{
-              backgroundColor: '#2a5a3a',
-              padding: 30,
-              borderRadius: 15,
-              alignItems: 'center',
-              marginTop: 10
-            }}>
-              <Icon name="credit-card" size={50} color="#90ee90" />
-              <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-SemiBold', marginTop: 15, textAlign: 'center' }}>
-                No Expenses Yet
-              </Text>
-              <Text style={{ color: '#c0e0c0', textAlign: 'center', fontFamily: 'Poppins-Regular', marginTop: 10 }}>
-                Start tracking your expenses by tapping the + button
-              </Text>
+              {/* Daily Spending */}
+              <View style={{
+                backgroundColor: '#2a5a3a',
+                padding: 20,
+                borderRadius: 20,
+                marginBottom: 30,
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15, gap: 8 }}>
+                  <Icon name="calendar" size={20} color="#4ECDC4" />
+                  <Text style={{ color: '#90ee90', fontSize: 16, fontFamily: 'Poppins-SemiBold' }}>
+                    Daily Spending
+                  </Text>
+                </View>
+                
+                {dailySpending.length > 0 ? (
+                  dailySpending.map((day, index) => {
+                    const maxAmount = Math.max(...dailySpending.map(d => d.amount), 1);
+                    const percentage = (day.amount / maxAmount) * 100;
+                    return (
+                      <View key={index} style={{ marginBottom: 15 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                          <Text style={{ color: '#ffffff', fontFamily: 'Poppins-Regular', fontSize: 13 }}>
+                            Day {day.day} ({day.dayName})
+                          </Text>
+                          <Text style={{ color: '#4ECDC4', fontFamily: 'Poppins-SemiBold', fontSize: 13 }}>
+                            ₱{formatNumber(day.amount)}
+                          </Text>
+                        </View>
+                        <View style={{ height: 6, backgroundColor: '#3a6a4a', borderRadius: 3, overflow: 'hidden' }}>
+                          <View style={{
+                            height: '100%',
+                            width: `${percentage}%`,
+                            backgroundColor: '#4ECDC4',
+                            borderRadius: 3,
+                          }} />
+                        </View>
+                      </View>
+                    );
+                  })
+                ) : (
+                  <View style={{ alignItems: 'center', padding: 30 }}>
+                    <Icon name="bar-chart-2" size={50} color="#90ee90" opacity={0.5} />
+                    <Text style={{ color: '#c0e0c0', textAlign: 'center', fontFamily: 'Poppins-Regular', marginTop: 10 }}>
+                      No spending data for {selectedMonth}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {expenses.length === 0 && shoppingItems.filter(i => i.completed).length === 0 && (
+                <View style={{
+                  backgroundColor: '#2a5a3a',
+                  padding: 30,
+                  borderRadius: 15,
+                  alignItems: 'center',
+                  marginTop: 10,
+                  marginBottom: 20
+                }}>
+                  <Icon name="credit-card" size={50} color="#90ee90" opacity={0.5} />
+                  <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-SemiBold', marginTop: 15, textAlign: 'center' }}>
+                    No Data Yet
+                  </Text>
+                  <Text style={{ color: '#c0e0c0', textAlign: 'center', fontFamily: 'Poppins-Regular', marginTop: 10 }}>
+                    Add expenses or complete shopping items to see statistics.
+                  </Text>
+                </View>
+              )}
             </View>
           )}
-        </View>
-      </ScrollView>
+          keyExtractor={() => 'content'}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#90ee90"
+              colors={['#90ee90']}
+            />
+          }
+        />
+      </View>
 
-      {/* Custom Calendar Modal - No Blinking */}
       <CustomDatePicker />
     </SafeAreaView>
   );

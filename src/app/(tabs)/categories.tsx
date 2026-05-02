@@ -3,6 +3,22 @@ import { ActivityIndicator, Alert, FlatList, Modal, RefreshControl, SafeAreaView
 import Icon from 'react-native-vector-icons/Feather';
 import { addCategory, Category, deleteCategory, getCategories, updateCategory } from '../../../store/expenses';
 
+// Static categories list (fallback when no categories in Firebase)
+const STATIC_CATEGORIES: Category[] = [
+  { name: 'Food', userId: '' },
+  { name: 'Transportation', userId: '' },
+  { name: 'Maintenance', userId: '' },
+  { name: 'Bills', userId: '' },
+  { name: 'Shopping', userId: '' },
+  { name: 'Entertainment', userId: '' },
+  { name: 'Health', userId: '' },
+  { name: 'Education', userId: '' },
+  { name: 'Travel', userId: '' },
+  { name: 'Subscriptions', userId: '' },
+  { name: 'Personal Care', userId: '' },
+  { name: 'Others', userId: '' },
+];
+
 export default function CategoriesScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [newCategory, setNewCategory] = useState('');
@@ -16,6 +32,7 @@ export default function CategoriesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [editName, setEditName] = useState('');
+  const [usingStatic, setUsingStatic] = useState(false);
 
   useEffect(() => {
     loadCategories();
@@ -25,10 +42,21 @@ export default function CategoriesScreen() {
     try {
       setLoading(true);
       const cats = await getCategories();
-      setCategories(cats);
+      
+      if (cats.length === 0) {
+        // If no categories in Firebase, use static categories
+        setCategories(STATIC_CATEGORIES);
+        setUsingStatic(true);
+      } else {
+        setCategories(cats);
+        setUsingStatic(false);
+      }
     } catch (error) {
       console.error('Error loading categories:', error);
-      showErrorAlert('Failed to load categories');
+      // On error, fallback to static categories
+      setCategories(STATIC_CATEGORIES);
+      setUsingStatic(true);
+      showErrorAlert('Using default categories');
     } finally {
       setLoading(false);
     }
@@ -58,14 +86,38 @@ export default function CategoriesScreen() {
       return;
     }
 
+    // Check if category already exists in current list
+    if (categories.some(cat => cat.name.toLowerCase() === newCategory.trim().toLowerCase())) {
+      showErrorAlert('Category already exists');
+      return;
+    }
+
     const result = await addCategory(newCategory.trim());
     if (result.success) {
       setNewCategory('');
       setShowAddModal(false);
-      loadCategories();
+      await loadCategories();
       showSuccessAlert('Category added successfully');
     } else {
       showErrorAlert(result.error);
+    }
+  };
+
+  const getIconForCategory = (categoryName: string) => {
+    switch(categoryName.toLowerCase()) {
+      case 'food': return 'coffee';
+      case 'transportation': return 'truck';
+      case 'maintenance': return 'tool';
+      case 'bills': return 'file-text';
+      case 'shopping': return 'shopping-bag';
+      case 'entertainment': return 'film';
+      case 'health': return 'heart';
+      case 'education': return 'book';
+      case 'travel': return 'map-pin';
+      case 'family': return 'users';
+      case 'subscriptions': return 'repeat';
+      case 'personal care': return 'user';
+      default: return 'tag';
     }
   };
 
@@ -75,30 +127,57 @@ export default function CategoriesScreen() {
       return;
     }
 
+    // Check if category already exists (excluding current one)
+    if (categories.some(cat => cat.name.toLowerCase() === editName.trim().toLowerCase() && cat.id !== editingCategory?.id)) {
+      showErrorAlert('Category already exists');
+      return;
+    }
+
     if (editingCategory) {
-      const result = await updateCategory(editingCategory.id!, editName.trim());
-      if (result.success) {
+      // If using static categories, just update locally
+      if (usingStatic && !editingCategory.id) {
+        const updatedCategories = categories.map(cat => 
+          cat.name === editingCategory.name ? { ...cat, name: editName.trim() } : cat
+        );
+        setCategories(updatedCategories);
+        showSuccessAlert('Category updated successfully');
         setShowEditModal(false);
         setEditingCategory(null);
         setEditName('');
-        loadCategories();
-        showSuccessAlert('Category updated successfully');
       } else {
-        showErrorAlert(result.error);
+        const result = await updateCategory(editingCategory.id!, editName.trim());
+        if (result.success) {
+          setShowEditModal(false);
+          setEditingCategory(null);
+          setEditName('');
+          await loadCategories();
+          showSuccessAlert('Category updated successfully');
+        } else {
+          showErrorAlert(result.error);
+        }
       }
     }
   };
 
   const handleDeleteCategory = async () => {
     if (categoryToDelete) {
-      const result = await deleteCategory(categoryToDelete.id!);
-      if (result.success) {
+      // If using static categories, just remove locally
+      if (usingStatic && !categoryToDelete.id) {
+        const updatedCategories = categories.filter(cat => cat.name !== categoryToDelete.name);
+        setCategories(updatedCategories);
+        showSuccessAlert('Category deleted successfully');
         setShowDeleteModal(false);
         setCategoryToDelete(null);
-        loadCategories();
-        showSuccessAlert('Category deleted successfully');
       } else {
-        showErrorAlert(result.error);
+        const result = await deleteCategory(categoryToDelete.id!);
+        if (result.success) {
+          setShowDeleteModal(false);
+          setCategoryToDelete(null);
+          await loadCategories();
+          showSuccessAlert('Category deleted successfully');
+        } else {
+          showErrorAlert(result.error);
+        }
       }
     }
   };
@@ -124,9 +203,12 @@ export default function CategoriesScreen() {
       justifyContent: 'space-between',
       alignItems: 'center'
     }}>
-      <Text style={{ color: '#ffffff', fontSize: 16, fontFamily: 'Poppins-Regular', flex: 1 }}>
-        {item.name}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+        <Icon name={getIconForCategory(item.name)} size={20} color="#90ee90" style={{ marginRight: 12 }} />
+        <Text style={{ color: '#ffffff', fontSize: 16, fontFamily: 'Poppins-Regular', flex: 1 }}>
+          {item.name}
+        </Text>
+      </View>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <TouchableOpacity 
           onPress={() => openEditModal(item)}
@@ -166,7 +248,7 @@ export default function CategoriesScreen() {
       <StatusBar barStyle="light-content" backgroundColor="#1a472a" />
       <View style={{ flex: 1, paddingHorizontal: 20 }}>
         {/* Header with Title and Add Button */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 35, marginBottom: 20 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 20, marginBottom: 20 }}>
           <Text style={{ color: '#ffffff', fontSize: 28, fontFamily: 'Poppins-Bold' }}>
             Categories
           </Text>
@@ -186,12 +268,27 @@ export default function CategoriesScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Static Categories Hint */}
+        {usingStatic && (
+          <View style={{
+            backgroundColor: '#2a5a3a',
+            padding: 8,
+            borderRadius: 8,
+            marginBottom: 10,
+            alignItems: 'center',
+          }}>
+            <Text style={{ color: '#90ee90', fontSize: 11, fontFamily: 'Poppins-Regular' }}>
+              Using default categories. Add new categories to save to cloud.
+            </Text>
+          </View>
+        )}
+
         <FlatList
           data={categories}
           renderItem={renderCategory}
-          keyExtractor={(item) => item.id!}
+          keyExtractor={(item, index) => item.id || index.toString()}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 20 }}
+          contentContainerStyle={{ paddingBottom: 100 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -210,7 +307,7 @@ export default function CategoriesScreen() {
           }
         />
 
-        {/* Add Category Modal - Minimal Size */}
+        {/* Add Category Modal */}
         <Modal
           visible={showAddModal}
           transparent={true}
@@ -299,7 +396,7 @@ export default function CategoriesScreen() {
           </View>
         </Modal>
 
-        {/* Edit Category Modal - Minimal Size */}
+        {/* Edit Category Modal */}
         <Modal
           visible={showEditModal}
           transparent={true}
@@ -388,7 +485,7 @@ export default function CategoriesScreen() {
           </View>
         </Modal>
 
-        {/* Delete Category Modal - Dark Green Minimal Size */}
+        {/* Delete Category Modal */}
         <Modal
           visible={showDeleteModal}
           transparent={true}
@@ -462,7 +559,7 @@ export default function CategoriesScreen() {
           </View>
         </Modal>
 
-        {/* Success Modal - Minimal Size */}
+        {/* Success Modal */}
         <Modal
           visible={showSuccessModal}
           transparent={true}

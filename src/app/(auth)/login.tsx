@@ -1,7 +1,10 @@
+// app/(auth)/login-screen.tsx
+
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function LoginScreen() {
@@ -9,22 +12,51 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isConnected, setIsConnected] = useState(true);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showNoAccountModal, setShowNoAccountModal] = useState(false);
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signIn, userProfile } = useAuth();
 
-  const showError = (message: string) => {
+  // Check if user is already logged in (offline)
+  useEffect(() => {
+    if (userProfile) {
+      router.replace('/(tabs)/home');
+    }
+  }, [userProfile]);
+
+  // Check network connection
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected ?? false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const showError = (message: string, isNoAccount: boolean = false) => {
     setErrorMessage(message);
-    setShowErrorModal(true);
-    setTimeout(() => {
-      setShowErrorModal(false);
-    }, 2000);
+    if (isNoAccount) {
+      setShowNoAccountModal(true);
+      setTimeout(() => {
+        setShowNoAccountModal(false);
+      }, 3000);
+    } else {
+      setShowErrorModal(true);
+      setTimeout(() => {
+        setShowErrorModal(false);
+      }, 2000);
+    }
   };
 
   const handleLogin = async () => {
     if (!identifier || !password) {
       showError('Please fill in all fields');
+      return;
+    }
+
+    if (!isConnected) {
+      showError('No internet connection. Please connect to the internet to login.');
       return;
     }
 
@@ -35,7 +67,13 @@ export default function LoginScreen() {
     if (result.success) {
       router.replace('/(tabs)/home');
     } else {
-      showError('Invalid username/email or password');
+      if (result.error?.toLowerCase().includes('user-not-found') || 
+          result.error?.toLowerCase().includes('invalid username') ||
+          result.error?.toLowerCase().includes('no user record')) {
+        showError('No account found with this email/username. Please sign up first.', true);
+      } else {
+        showError(result.error || 'Invalid username/email or password');
+      }
     }
   };
 
@@ -51,8 +89,8 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ padding: 20 }}>
-          {/* Logo Only */}
-          <View style={{ alignItems: 'center', marginBottom: 6 }}>
+          {/* Logo */}
+          <View style={{ alignItems: 'center', marginBottom: 20 }}>
             <Image 
               source={require('../../../assets/images/logo.png')} 
               style={{ 
@@ -64,8 +102,11 @@ export default function LoginScreen() {
           </View>
 
           {/* Login Title */}
-          <Text style={{ fontSize: 24, color: '#ffffff', fontFamily: 'Poppins-Bold', marginBottom: 10, textAlign: 'center' }}>
-            Login
+          <Text style={{ fontSize: 28, color: '#ffffff', fontFamily: 'Poppins-Bold', marginBottom: 10, textAlign: 'center' }}>
+            Welcome Back
+          </Text>
+          <Text style={{ fontSize: 14, color: '#90ee90', fontFamily: 'Poppins-Regular', marginBottom: 30, textAlign: 'center' }}>
+            Sign in to continue
           </Text>
 
           {/* Email/Username Input */}
@@ -133,15 +174,18 @@ export default function LoginScreen() {
               padding: 15,
               borderRadius: 10,
               alignItems: 'center',
-              marginBottom: 20
+              marginBottom: 20,
+              opacity: (!isConnected || loading) ? 0.6 : 1
             }}
             onPress={handleLogin}
-            disabled={loading}
+            disabled={loading || !isConnected}
           >
             {loading ? (
               <ActivityIndicator color="#1a472a" />
             ) : (
-              <Text style={{ color: '#1a472a', fontSize: 16, fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>Login</Text>
+              <Text style={{ color: '#1a472a', fontSize: 16, fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>
+                {!isConnected ? 'No Internet Connection' : 'Login'}
+              </Text>
             )}
           </TouchableOpacity>
 
@@ -155,7 +199,54 @@ export default function LoginScreen() {
         </View>
       </ScrollView>
 
-      {/* Error Modal - Dark Green Theme with Minimal Size */}
+      {/* Offline Warning Modal */}
+      <Modal
+        visible={!isConnected}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 20,
+        }}>
+          <View style={{
+            backgroundColor: '#1a472a',
+            padding: 20,
+            borderRadius: 16,
+            width: '85%',
+            maxWidth: 280,
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: '#FFA500',
+          }}>
+            <View style={{
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              backgroundColor: '#FFA50020',
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginBottom: 12,
+            }}>
+              <Icon name="wifi-off" size={28} color="#FFA500" />
+            </View>
+            
+            <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-Bold', marginBottom: 6, textAlign: 'center' }}>
+              No Internet Connection
+            </Text>
+            
+            <Text style={{ color: '#c0e0c0', fontSize: 13, fontFamily: 'Poppins-Regular', textAlign: 'center', marginBottom: 15 }}>
+              Please connect to the internet to login. Once logged in, you can use the app offline.
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Regular Error Modal */}
       <Modal
         visible={showErrorModal}
         transparent={true}
@@ -179,7 +270,6 @@ export default function LoginScreen() {
             borderWidth: 1,
             borderColor: '#4a8a6a',
           }}>
-            {/* Error Icon */}
             <View style={{
               width: 50,
               height: 50,
@@ -199,6 +289,83 @@ export default function LoginScreen() {
             <Text style={{ color: '#c0e0c0', fontSize: 13, fontFamily: 'Poppins-Regular', textAlign: 'center', marginBottom: 15 }}>
               {errorMessage}
             </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* No Account Modal */}
+      <Modal
+        visible={showNoAccountModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowNoAccountModal(false)}
+      >
+        <View style={{
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: 20,
+        }}>
+          <View style={{
+            backgroundColor: '#1a472a',
+            padding: 20,
+            borderRadius: 16,
+            width: '85%',
+            maxWidth: 300,
+            alignItems: 'center',
+            borderWidth: 1,
+            borderColor: '#4a8a6a',
+          }}>
+            <View style={{
+              width: 50,
+              height: 50,
+              borderRadius: 25,
+              backgroundColor: '#2a5a3a',
+              justifyContent: 'center',
+              alignItems: 'center',
+              marginBottom: 12,
+            }}>
+              <Icon name="user-plus" size={28} color="#90ee90" />
+            </View>
+            
+            <Text style={{ color: '#ffffff', fontSize: 18, fontFamily: 'Poppins-Bold', marginBottom: 6, textAlign: 'center' }}>
+              No Account Found
+            </Text>
+            
+            <Text style={{ color: '#c0e0c0', fontSize: 13, fontFamily: 'Poppins-Regular', textAlign: 'center', marginBottom: 20 }}>
+              We couldn't find an account with that email/username. Please sign up to create a new account.
+            </Text>
+            
+            <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#3a6a4a',
+                  padding: 12,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                }}
+                onPress={() => setShowNoAccountModal(false)}
+              >
+                <Text style={{ color: '#ffffff', fontFamily: 'Poppins-Regular' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#90ee90',
+                  padding: 12,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                }}
+                onPress={() => {
+                  setShowNoAccountModal(false);
+                  router.push('/(auth)/signup');
+                }}
+              >
+                <Text style={{ color: '#1a472a', fontFamily: 'Poppins-SemiBold' }}>Sign Up</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

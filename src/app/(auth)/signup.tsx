@@ -1,6 +1,18 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
+} from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -15,22 +27,22 @@ export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
   const [checkingUsername, setCheckingUsername] = useState(false);
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [modalVisible, setModalVisible] = useState(false); // New state for custom modal
+
   const router = useRouter();
   const { signUp, checkUsernameExists } = useAuth();
 
-  // Validation function for full name (only letters and spaces)
+  // Validation functions (unchanged)
   const validateFullName = (name: string) => {
     const nameRegex = /^[A-Za-z\s]+$/;
     return nameRegex.test(name);
   };
 
-  // Validation function for username (letters, numbers, underscore, no spaces)
   const validateUsername = (name: string) => {
     const usernameRegex = /^[A-Za-z0-9_]{3,20}$/;
     return usernameRegex.test(name);
   };
 
-  // Validation function for password (minimum 8 characters)
   const validatePassword = (pass: string) => {
     return pass.length >= 8;
   };
@@ -56,50 +68,45 @@ export default function SignupScreen() {
   };
 
   const handleSignup = async () => {
-    // Check if all fields are filled
     if (!fullName || !username || !email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
-    // Validate full name (letters only)
     if (!validateFullName(fullName)) {
       Alert.alert('Error', 'Full name can only contain letters and spaces');
       return;
     }
 
-    // Validate full name length
     if (fullName.trim().length < 2) {
       Alert.alert('Error', 'Full name must be at least 2 characters');
       return;
     }
 
-    // Validate username
     if (!validateUsername(username)) {
-      Alert.alert('Error', 'Username must be 3-20 characters and can only contain letters, numbers, and underscore');
+      Alert.alert(
+        'Error',
+        'Username must be 3-20 characters and can only contain letters, numbers, and underscore'
+      );
       return;
     }
 
-    // Check username availability
     if (!usernameAvailable) {
       Alert.alert('Error', 'Please check username availability');
       return;
     }
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
-    // Validate password length
     if (!validatePassword(password)) {
       Alert.alert('Error', 'Password must be at least 8 characters');
       return;
     }
 
-    // Check if passwords match
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
       return;
@@ -110,38 +117,61 @@ export default function SignupScreen() {
     setLoading(false);
 
     if (result.success) {
-      Alert.alert(
-        'Verification Email Sent',
-        'Please verify your email before logging in. Check your Gmail inbox.',
-        [{ text: 'OK', onPress: () => router.push('/(auth)/login') }]
-      );
+      setModalVisible(true); // Show custom modal instead of Alert
     } else {
       Alert.alert('Signup Failed', result.error);
     }
   };
 
+  const handleModalClose = () => {
+    setModalVisible(false);
+    router.push('/(auth)/login');
+  };
+
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: '#1a472a' }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
-      <ScrollView 
+      <ScrollView
         contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ padding: 20 }}>
-          <Text style={{ fontSize: 32, color: '#ffffff', fontFamily: 'Poppins-Bold', marginBottom: 30, textAlign: 'center' }}>
+          <Text
+            style={{
+              fontSize: 32,
+              color: '#ffffff',
+              fontFamily: 'Poppins-Bold',
+              marginBottom: 30,
+              textAlign: 'center',
+            }}
+          >
             Create Account
           </Text>
 
           {/* Full Name Input */}
           <View style={{ marginBottom: 15 }}>
-            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular', fontSize: 14 }}>
+            <Text
+              style={{
+                color: '#90ee90',
+                marginBottom: 5,
+                fontFamily: 'Poppins-Regular',
+                fontSize: 14,
+              }}
+            >
               Full Name
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a5a3a', borderRadius: 10 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#2a5a3a',
+                borderRadius: 10,
+              }}
+            >
               <Icon name="user" size={20} color="#90ee90" style={{ marginLeft: 15 }} />
               <TextInput
                 style={{ flex: 1, padding: 15, color: '#ffffff', fontFamily: 'Poppins-Regular' }}
@@ -156,10 +186,24 @@ export default function SignupScreen() {
 
           {/* Username Input */}
           <View style={{ marginBottom: 15 }}>
-            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular', fontSize: 14 }}>
+            <Text
+              style={{
+                color: '#90ee90',
+                marginBottom: 5,
+                fontFamily: 'Poppins-Regular',
+                fontSize: 14,
+              }}
+            >
               Username
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a5a3a', borderRadius: 10 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#2a5a3a',
+                borderRadius: 10,
+              }}
+            >
               <Icon name="at-sign" size={20} color="#90ee90" style={{ marginLeft: 15 }} />
               <TextInput
                 style={{ flex: 1, padding: 15, color: '#ffffff', fontFamily: 'Poppins-Regular' }}
@@ -187,17 +231,38 @@ export default function SignupScreen() {
                 ) : null}
               </View>
             )}
-            <Text style={{ color: '#c0e0c0', fontSize: 10, marginTop: 5, fontFamily: 'Poppins-Regular' }}>
+            <Text
+              style={{
+                color: '#c0e0c0',
+                fontSize: 10,
+                marginTop: 5,
+                fontFamily: 'Poppins-Regular',
+              }}
+            >
               Letters, numbers, underscore only (3-20 characters)
             </Text>
           </View>
 
           {/* Email Input */}
           <View style={{ marginBottom: 15 }}>
-            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular', fontSize: 14 }}>
+            <Text
+              style={{
+                color: '#90ee90',
+                marginBottom: 5,
+                fontFamily: 'Poppins-Regular',
+                fontSize: 14,
+              }}
+            >
               Email Address
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a5a3a', borderRadius: 10 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#2a5a3a',
+                borderRadius: 10,
+              }}
+            >
               <Icon name="mail" size={20} color="#90ee90" style={{ marginLeft: 15 }} />
               <TextInput
                 style={{ flex: 1, padding: 15, color: '#ffffff', fontFamily: 'Poppins-Regular' }}
@@ -214,10 +279,24 @@ export default function SignupScreen() {
 
           {/* Password Input */}
           <View style={{ marginBottom: 15 }}>
-            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular', fontSize: 14 }}>
+            <Text
+              style={{
+                color: '#90ee90',
+                marginBottom: 5,
+                fontFamily: 'Poppins-Regular',
+                fontSize: 14,
+              }}
+            >
               Password (Min. 8 Characters)
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a5a3a', borderRadius: 10 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#2a5a3a',
+                borderRadius: 10,
+              }}
+            >
               <Icon name="lock" size={20} color="#90ee90" style={{ marginLeft: 15 }} />
               <TextInput
                 style={{ flex: 1, padding: 15, color: '#ffffff', fontFamily: 'Poppins-Regular' }}
@@ -235,10 +314,24 @@ export default function SignupScreen() {
 
           {/* Confirm Password Input */}
           <View style={{ marginBottom: 20 }}>
-            <Text style={{ color: '#90ee90', marginBottom: 5, fontFamily: 'Poppins-Regular', fontSize: 14 }}>
+            <Text
+              style={{
+                color: '#90ee90',
+                marginBottom: 5,
+                fontFamily: 'Poppins-Regular',
+                fontSize: 14,
+              }}
+            >
               Confirm Password
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#2a5a3a', borderRadius: 10 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#2a5a3a',
+                borderRadius: 10,
+              }}
+            >
               <Icon name="lock" size={20} color="#90ee90" style={{ marginLeft: 15 }} />
               <TextInput
                 style={{ flex: 1, padding: 15, color: '#ffffff', fontFamily: 'Poppins-Regular' }}
@@ -248,7 +341,10 @@ export default function SignupScreen() {
                 onChangeText={setConfirmPassword}
                 secureTextEntry={!showConfirmPassword}
               />
-              <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={{ padding: 15 }}>
+              <TouchableOpacity
+                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                style={{ padding: 15 }}
+              >
                 <Icon name={showConfirmPassword ? 'eye-off' : 'eye'} size={20} color="#90ee90" />
               </TouchableOpacity>
             </View>
@@ -262,7 +358,7 @@ export default function SignupScreen() {
               borderRadius: 10,
               alignItems: 'center',
               marginBottom: 20,
-              opacity: loading ? 0.7 : 1
+              opacity: loading ? 0.7 : 1,
             }}
             onPress={handleSignup}
             disabled={loading}
@@ -270,19 +366,110 @@ export default function SignupScreen() {
             {loading ? (
               <ActivityIndicator color="#1a472a" />
             ) : (
-              <Text style={{ color: '#1a472a', fontSize: 16, fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>Sign Up</Text>
+              <Text
+                style={{
+                  color: '#1a472a',
+                  fontSize: 16,
+                  fontWeight: 'bold',
+                  fontFamily: 'Poppins-SemiBold',
+                }}
+              >
+                Sign Up
+              </Text>
             )}
           </TouchableOpacity>
 
           {/* Login Link */}
           <View style={{ flexDirection: 'row', justifyContent: 'center' }}>
-            <Text style={{ color: '#c0e0c0', fontFamily: 'Poppins-Regular' }}>Already have an account? </Text>
+            <Text style={{ color: '#c0e0c0', fontFamily: 'Poppins-Regular' }}>
+              Already have an account?{' '}
+            </Text>
             <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
-              <Text style={{ color: '#90ee90', fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>Login</Text>
+              <Text style={{ color: '#90ee90', fontWeight: 'bold', fontFamily: 'Poppins-SemiBold' }}>
+                Login
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
+
+      {/* Custom Dark Green Minimal Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={handleModalClose}
+      >
+        <TouchableWithoutFeedback onPress={handleModalClose}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <TouchableWithoutFeedback>
+              <View
+                style={{
+                  backgroundColor: '#1a472a',
+                  borderRadius: 20,
+                  padding: 24,
+                  width: '80%',
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: '#2a5a3a',
+                }}
+              >
+                <Icon name="mail" size={48} color="#90ee90" style={{ marginBottom: 16 }} />
+                <Text
+                  style={{
+                    color: '#ffffff',
+                    fontSize: 20,
+                    fontFamily: 'Poppins-SemiBold',
+                    marginBottom: 8,
+                    textAlign: 'center',
+                  }}
+                >
+                  Verification Email Sent
+                </Text>
+                <Text
+                  style={{
+                    color: '#c0e0c0',
+                    fontSize: 14,
+                    fontFamily: 'Poppins-Regular',
+                    textAlign: 'center',
+                    marginBottom: 24,
+                  }}
+                >
+                  Please verify your email before logging in. Check your Gmail inbox.
+                </Text>
+                <TouchableOpacity
+                  onPress={handleModalClose}
+                  style={{
+                    backgroundColor: '#90ee90',
+                    paddingVertical: 12,
+                    paddingHorizontal: 24,
+                    borderRadius: 30,
+                    minWidth: 120,
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: '#1a472a',
+                      fontSize: 16,
+                      fontFamily: 'Poppins-SemiBold',
+                    }}
+                  >
+                    OK
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }

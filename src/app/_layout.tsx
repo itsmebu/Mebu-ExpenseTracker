@@ -1,3 +1,5 @@
+// app/_layout.tsx
+
 import {
   Poppins_400Regular,
   Poppins_600SemiBold,
@@ -6,13 +8,14 @@ import {
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { SplashScreen, Stack } from 'expo-router';
-import React, { useEffect } from 'react';
-import { ActivityIndicator, useColorScheme, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, useColorScheme, View, Text } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const { user, loading } = useAuth();
+  const [isReady, setIsReady] = useState(false);
   
   const [fontsLoaded] = useFonts({
     'Poppins-Regular': Poppins_400Regular,
@@ -23,6 +26,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (fontsLoaded) {
       SplashScreen.hideAsync();
+      setIsReady(true);
     }
   }, [fontsLoaded]);
 
